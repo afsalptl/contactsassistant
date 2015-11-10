@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Contacts Assistant</string>
+    <string name="backup">Create New Backup</string>
+    <string name="restore">Restore from Backup File</string>
+</resources>
