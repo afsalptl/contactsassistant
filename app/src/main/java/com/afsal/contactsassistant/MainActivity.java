@@ -15,7 +15,6 @@ import android.view.View;
 import android.database.Cursor;
 import android.view.View.OnClickListener;
 import android.widget.Button;
-import android.widget.TextView;
 import android.widget.Toast;
 import java.io.BufferedReader;
 import java.io.File;
@@ -25,19 +24,32 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.io.PrintWriter;
+import java.security.InvalidKeyException;
+import java.security.Key;
+import java.security.NoSuchAlgorithmException;
+import java.security.spec.KeySpec;
 import java.util.ArrayList;
+
+import javax.crypto.BadPaddingException;
+import javax.crypto.Cipher;
+import javax.crypto.CipherOutputStream;
+import javax.crypto.IllegalBlockSizeException;
+import javax.crypto.NoSuchPaddingException;
+import javax.crypto.SecretKey;
+import javax.crypto.SecretKeyFactory;
+import javax.crypto.spec.PBEKeySpec;
+import javax.crypto.spec.SecretKeySpec;
 
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = "MEDIA";
-    private TextView tv;
+    public static String enc_key = "zombie";
+    Crypto crypto = new Crypto(enc_key);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
-
-        tv = (TextView) findViewById(R.id.TextView01);
 
         Button view = (Button)findViewById(R.id.btnbackup);
         Button add = (Button)findViewById(R.id.btnrestore);
@@ -57,7 +69,6 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-
     private void backup() {
 
         ContentResolver cr = getContentResolver();
@@ -71,13 +82,26 @@ public class MainActivity extends AppCompatActivity {
             {
                 String id = cur.getString(cur.getColumnIndex(ContactsContract.Contacts._ID));
                 String name = cur.getString(cur.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME));
-                if (Integer.parseInt(cur.getString(cur.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER))) > 0) {
+                String name_enc = "";
+                String phone_enc = "";
+                try {
+                    name_enc = crypto.encrypt(name);
+                }
+                catch(Exception e) {
+                    e.printStackTrace();
+                }
+                    if (Integer.parseInt(cur.getString(cur.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER))) > 0) {
                     Cursor pCur = cr.query(ContactsContract.CommonDataKinds.Phone.CONTENT_URI, null, ContactsContract.CommonDataKinds.Phone.CONTACT_ID +" = ?", new String[]{id}, null);
                     while (pCur != null && pCur.moveToNext())
                     {
-                        String phoneNo = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));
-                        String temp = name + "\n" + phoneNo + "\n";
-                        contact_string = contact_string + temp;
+                        String phone = pCur.getString(pCur.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER));
+                        try {
+                            phone_enc = crypto.encrypt(phone);
+                        }
+                        catch(Exception e) {
+                            e.printStackTrace();
+                        }
+                        contact_string = contact_string + name_enc + "\n" + phone_enc + "\n";
                     }
                     if(pCur!=null)
                         pCur.close();
@@ -87,13 +111,21 @@ public class MainActivity extends AppCompatActivity {
         if(cur!=null)
         cur.close();
         writeToSDFile(contact_string);
+        try {
+            //encrypt();
+        }
+        catch (Exception e)
+        {
+            Log.i("aa","eee");
+        }
     }
 
-    public void restore()
+    public int restore()
     {
-        String name,number;
-        final File file = new File(Environment.getExternalStorageDirectory()
-                .getAbsolutePath(), "/download/myData.txt");
+        String name,phone;
+        String name_dec="";
+        String phone_dec="";
+        final File file = new File(Environment.getExternalStorageDirectory().getAbsolutePath(), "/download/myData.txt");
 
         try {
             FileInputStream fin = new FileInputStream(file);
@@ -102,10 +134,23 @@ public class MainActivity extends AppCompatActivity {
             while(true){
                 try {
                     name = reader.readLine();
+                    try{
+
+                        name_dec = crypto.decrypt(name);
+                    }
+                    catch(Exception e) {
+                        e.printStackTrace();
+                    }
                         if(name==null)
                             break;
-                    number = reader.readLine();
-                    createContact(name,number);
+                    phone = reader.readLine();
+                    try{
+                        phone_dec = crypto.decrypt(phone);
+                    }
+                    catch(Exception e) {
+                        e.printStackTrace();
+                    }
+                    createContact(name_dec,phone_dec);
 
                 } catch (IOException ex) {
                     Log.i("FILE", "reading error");
@@ -115,33 +160,14 @@ public class MainActivity extends AppCompatActivity {
         catch (FileNotFoundException e) {
             e.printStackTrace();
             Log.i("FILE", "FIle Not Found");
+            return 0;
         }
-    }
-
-    private void checkExternalMedia(){
-        boolean mExternalStorageAvailable = false;
-        boolean mExternalStorageWriteable = false;
-        String state = Environment.getExternalStorageState();
-
-        if (Environment.MEDIA_MOUNTED.equals(state)) {
-            // Can read and write the media
-            mExternalStorageAvailable = mExternalStorageWriteable = true;
-        } else if (Environment.MEDIA_MOUNTED_READ_ONLY.equals(state)) {
-            // Can only read the media
-            mExternalStorageAvailable = true;
-            mExternalStorageWriteable = false;
-        } else {
-            // Can't read or write
-            mExternalStorageAvailable = mExternalStorageWriteable = false;
-        }
-        //tv.append("\n\nExternal Media: readable="
-                //+ mExternalStorageAvailable + " writable=" + mExternalStorageWriteable);
+        return 1;
     }
 
     private void writeToSDFile(String str){
 
         File root = android.os.Environment.getExternalStorageDirectory();
-        //tv.append("\nExternal file system root: " + root);
 
         File dir = new File (root.getAbsolutePath() + "/download");
         dir.mkdirs();
@@ -184,52 +210,21 @@ public class MainActivity extends AppCompatActivity {
                 .withValue(ContactsContract.CommonDataKinds.Phone.TYPE, ContactsContract.CommonDataKinds.Phone.TYPE_HOME)
                 .build());
 
-
         try {
             cr.applyBatch(ContactsContract.AUTHORITY, ops);
         } catch (RemoteException e) {
-            // TODO Auto-generated catch block
             e.printStackTrace();
         } catch (OperationApplicationException e) {
-            // TODO Auto-generated catch block
             e.printStackTrace();
         }
     }
 
-private class backup_Async extends AsyncTask<String, Void, String> {
-    ProgressDialog progress;
-
-    @Override
-    protected String doInBackground(String... params) {
-            backup();
-        return null;
-    }
-
-    @Override
-    protected void onPostExecute(String result) {
-        // execution of result of Long time consuming operation
-        super.onPostExecute(result);
-        progress.dismiss();
-        Toast.makeText(MainActivity.this, "Backup file Generated",Toast.LENGTH_LONG).show();
-    }
-
-    @Override
-    protected void onPreExecute() {
-        // Things to be done before execution of long running operation. For
-        progress = new ProgressDialog(MainActivity.this);
-        progress.setCancelable(false);
-        progress.setMessage("Generating Backup...");
-        progress.show();
-    }
-}
-
-
-    private class restore_Async extends AsyncTask<String, Void, String> {
+    private class backup_Async extends AsyncTask<String, Void, String> {
         ProgressDialog progress;
 
         @Override
         protected String doInBackground(String... params) {
-            restore();
+                backup();
             return null;
         }
 
@@ -238,20 +233,48 @@ private class backup_Async extends AsyncTask<String, Void, String> {
             // execution of result of Long time consuming operation
             super.onPostExecute(result);
             progress.dismiss();
-            Toast.makeText(MainActivity.this, "Contacts restored",Toast.LENGTH_LONG).show();
+            Toast.makeText(MainActivity.this, "Backup file Generated",Toast.LENGTH_LONG).show();
         }
 
         @Override
         protected void onPreExecute() {
             // Things to be done before execution of long running operation. For
+            progress = new ProgressDialog(MainActivity.this);
+            progress.setCancelable(false);
+            progress.setMessage("Generating Backup...");
+            progress.show();
+        }
+    }
 
+    private class restore_Async extends AsyncTask<String, Void, String> {
+        ProgressDialog progress;
+        int status;
+
+        @Override
+        protected String doInBackground(String... params) {
+            status = restore();
+            return null;
+        }
+
+        @Override
+        protected void onPostExecute(String result) {
+            // execution of result of Long time consuming operation
+            super.onPostExecute(result);
+            progress.dismiss();
+            if(status==1)
+                Toast.makeText(MainActivity.this, "Contacts restored",Toast.LENGTH_LONG).show();
+            else
+                Toast.makeText(MainActivity.this, "Error",Toast.LENGTH_LONG).show();
+        }
+
+        @Override
+        protected void onPreExecute() {
+            // Things to be done before execution of long running operation. For
             progress = new ProgressDialog(MainActivity.this);
             progress.setCancelable(false);
             progress.setMessage("Restoring Backup...");
             progress.show();
         }
     }
-
-
 
 }
